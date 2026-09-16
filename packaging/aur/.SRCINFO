@@ -10,6 +10,6 @@ pkgbase = gwt
 	depends = git
 	options = !debug
 	source = gwt-0.3.0.tar.gz::https://github.com/xiangnan0811/gwt/archive/refs/tags/v0.3.0.tar.gz
-	sha256sums = 213be0b9db54ee44547f85b11f67a2bd33264671b2a142cacd7348b5f9740df9
+	sha256sums = faa392d8fc36f401a3d3b18c5db0c692701a6cbc62631815ee8c4cbf8508a0c7
 
 pkgname = gwt
