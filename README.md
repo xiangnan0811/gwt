@@ -277,6 +277,14 @@ cp PKGBUILD .SRCINFO /tmp/aur-gwt/
 cd /tmp/aur-gwt && git add PKGBUILD .SRCINFO && git commit -m "gwt 0.3.0" && git push
 ```
 
+> 两个已经踩过的坑（都实测过，别再踩）：
+> 1. **master 与 tag 指向同一个 commit 时，必须分两次 push**。写在同一句
+>    `git push origin master vX.Y.Z` 里，GitHub 会按 commit 去重、只建一个 workflow run，
+>    tag 触发的 build/release 根本不会跑 —— 表现为 Release 迟迟不出现。
+> 2. **tag 触发的 workflow 取自该 tag 所指的那个 commit**，不是 master 的最新提交。
+>    所以任何 CI 修复都必须先推 master，再把 tag 移过去重推；否则改了也不生效。
+>    （移动 tag 会让归档 tarball 变化，因此校验和要跟着更新 —— 就是上面第 2 步。）
+
 ### 刻意接受的三条 namcap 告警
 
 ```

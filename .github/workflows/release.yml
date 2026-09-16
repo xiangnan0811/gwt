@@ -104,15 +104,47 @@ jobs:
           cd dist
           sha256sum gwt-linux-* > SHA256SUMS
           cat SHA256SUMS
-      - name: 创建 Release 并上传产物
+      - name: 创建 Release 并上传产物（直接走 REST API，不依赖 gh CLI 与本地 git 仓库）
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
-          else
-            gh release create "$GITHUB_REF_NAME" dist/* \
-              --title "$GITHUB_REF_NAME" \
-              --generate-notes
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          tag="$GITHUB_REF_NAME"
+
+          # 1) 幂等：同名 release 若已存在，先删掉（只删 release，不动 tag）
+          curl -sS -X DELETE -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" "$api/releases/tags/$tag" >/dev/null || true
+
+          # 2) 构造创建 release 的 payload（用 python 生成，避免 shell 拼 JSON）
+          TAG="$tag" REPO="$GITHUB_REPOSITORY" python3 -c 'import json,os; json.dump({"tag_name": os.environ["TAG"], "name": os.environ["TAG"], "body": "gwt static Linux binaries (no interpreter, no libc dependency).\n\nInstall:\n\n    curl -fsSL https://raw.githubusercontent.com/%s/master/install.sh | sh\n" % os.environ["REPO"]}, open("/tmp/payload.json", "w"))'
+
+          # 注意：-d 默认发 application/x-www-form-urlencoded，而 REST API 要 application/json
+          code=$(curl -sS -o /tmp/rel.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            "$api/releases" --data-binary @/tmp/payload.json)
+          if [ "$code" != "201" ]; then
+            echo "创建 Release 失败（HTTP $code）："; cat /tmp/rel.json; exit 1
           fi
+          echo "Release $tag 已创建"
+
+          # 3) 逐个上传资产：upload_url 末尾的 {?name,label} 要去掉
+          upload=$(python3 -c 'import json; print(json.load(open("/tmp/rel.json"))["upload_url"].split("{")[0])')
+          for f in dist/*; do
+            name=$(basename "$f")
+            code=$(curl -sS -o /tmp/up.json -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @"$f" "$upload?name=$name")
+            if [ "$code" != "201" ]; then
+              echo "上传 $name 失败（HTTP $code）："; cat /tmp/up.json; exit 1
+            fi
+            echo "已上传 $name"
+          done
+
+          # 4) 回读确认
+          curl -sS -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" "$api/releases/tags/$tag" \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); print("Release", d["tag_name"], "资产:"); [print("  -", a["name"], a["size"], "bytes") for a in d["assets"]]'
