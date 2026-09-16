@@ -1,0 +1,26 @@
+# 编译产物：不要把二进制提交进仓库
+/gwt
+/gwt-linux-*
+/gwt-darwin-*
+/gwt-windows-*
+/gwt-freebsd-*
+*.exe
+
+# Go 构建缓存（沙箱或打包时可能被指到仓库内）
+/.gocache/
+/.gopath/
+
+# makepkg 产物
+/pkg/
+/src/
+*.pkg.tar.*
+*.src.tar.gz
+/packaging/aur/pkg/
+/packaging/aur/src/
+
+# 开发期临时 fixture（tests/fixtures.py 的输出）
+/.scratch/
+
+# Python 测试的字节码
+__pycache__/
+*.pyc

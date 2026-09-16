@@ -12,16 +12,55 @@
   `.git/index` 的行为都禁掉
 - ahead/behind **只基于本地已有引用**计算，绝不联网
 
-## 构建
+## 安装
+
+### Arch Linux（AUR）
 
 ```bash
-cd ~/code/gwt
+yay -S gwt        # 或 paru -S gwt
+```
+
+装完就归 pacman 管（`pacman -Q gwt` / `pacman -R gwt` 都能用）。
+
+需要说清楚的一点：**AUR 包不能 `pacman -S` 安装**。AUR 只是存放 PKGBUILD 的地方，
+pacman 不认它；安装只能走 AUR helper（yay/paru）或手动
+`git clone https://aur.archlinux.org/gwt.git && cd gwt && makepkg -si`。
+想要真正 `pacman -S gwt`，得另外自建一个二进制仓库（本仓库暂未提供）。
+
+### 任意 Linux 发行版（预编译二进制 + 安装脚本）
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xiangnan0811/gwt/master/install.sh | sh
+```
+
+安装脚本会：识别架构 → 下载对应二进制 → **强制校验 sha256**（拿不到 `SHA256SUMS`
+就直接拒绝安装，没有跳过校验的后门）→ 装到 `~/.local/bin`，不需要 root。
+
+```bash
+sh install.sh --version 0.3.0       # 指定版本（默认 latest）
+sh install.sh --prefix /usr/local   # 换前缀（需要 sudo）
+sh install.sh --dry-run             # 只打印将要做什么
+sh install.sh --uninstall           # 卸载
+sh install.sh --dist-dir ./dist     # 离线模式：从本地目录读二进制与 SHA256SUMS
+```
+
+因为产物是无解释器、无 libc 依赖的静态二进制，glibc 与 musl（Alpine）发行版都能直接跑。
+
+### 从源码构建
+
+```bash
 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o gwt .   # 产出静态二进制 ./gwt
 file gwt        # → ELF 64-bit LSB executable, statically linked, stripped
 go test ./...   # 21 个 Go 单元测试
 ```
 
-只用到标准库，无需联网拉依赖。想装到 PATH 就自己 `install -m755 gwt ~/.local/bin/`。
+只用到标准库，无需联网拉依赖。装到 PATH 就 `install -m755 gwt ~/.local/bin/`。
+
+打包/发布时会注入版本号，所以 `gwt --version` 与包版本一致：
+
+```bash
+go build -ldflags "-s -w -X main.version=0.3.0" -o gwt .
+```
 
 ## 运行
 
@@ -134,6 +173,10 @@ go test ./...   # 21 个 Go 单元测试
     也不覆盖用户的 locale / git config —— 工具要如实反映你环境下的仓库状态。
 11. **Linux 专用**：是否为 tty、终端宽度走的是 `syscall` + `TCGETS`/`TIOCGWINSZ`
     ioctl。macOS/Windows 未测试、未适配（macOS 换个 ioctl 常量即可，但没验证过）。
+    `install.sh` 在非 Linux 上会明确拒绝而不是装一个跑不起来的二进制。
+12. **输出界面目前只有中文**：列名、标记、图例全是中文（AUR 的 `pkgdesc` 与 man page
+    是英文，便于检索）。面向国际用户的话，需要给列名/标记/图例加一层文案表 —— 属于
+    后续工作，本版没做。
 
 ## 测试
 
@@ -191,4 +234,65 @@ python3 tests/fixtures.py /tmp/gwt-demo      # 打印各 fixture 路径
 仓库 × 多种宽度/模式的表格 + JSON），确认一致后才删掉 Python 版。
 留下的 `tests/` 是纯黑盒验收：它只调用 CLI、解析输出、比对仓库快照，因此换实现
 不影响它 —— 这既是当时的验收门槛，也是以后回归的保障。
-# gwt
+
+## 打包与发布（维护者）
+
+| 文件 | 作用 |
+| --- | --- |
+| `packaging/aur/PKGBUILD` | AUR 源码包的 PKGBUILD（提交到 AUR 的是它的副本） |
+| `packaging/aur/.SRCINFO` | 由 `makepkg --printsrcinfo` 生成，**不要手改** |
+| `install.sh` | 跨发行版的预编译二进制安装脚本（POSIX sh） |
+| `.github/workflows/release.yml` | CI：分支上跑测试；打 tag 后构建多架构产物并建 Release |
+
+### 发一个版本
+
+```bash
+# 1) 打 tag 推送：CI 会跑 gofmt/vet/test，再构建 linux/{amd64,arm64,386,riscv64}
+git tag -a v0.3.0 -m "gwt 0.3.0"
+git push origin master v0.3.0
+
+# 2) 用归档 tarball 的真实校验和更新 PKGBUILD
+#    GitHub 归档会去掉 tag 的前导 v：tag v0.3.0 → 顶层目录 gwt-0.3.0
+#    所以 PKGBUILD 里是 cd "$srcdir/$pkgname-$pkgver"
+cd packaging/aur
+updpkgsums                      # 或手动从归档 tarball 算 sha256 填进 sha256sums
+
+# 3) 重新生成 .SRCINFO，并本地完整验证（会真的下载源码、跑 go test）
+makepkg --printsrcinfo > .SRCINFO
+makepkg -f --check
+namcap PKGBUILD && namcap gwt-*.pkg.tar.zst
+
+# 3.5) 把更新后的 PKGBUILD / .SRCINFO 提交回本仓库
+#      （校验和只能在 tag 存在之后才能算出来，所以这一步天然晚于第 1 步）
+git add packaging/aur/PKGBUILD packaging/aur/.SRCINFO
+git commit -m "packaging: update checksums for v0.3.0" && git push
+
+# 4) 推到 AUR（首次需要 AUR 账号，且已把 SSH 公钥加到 aur.archlinux.org）
+git clone ssh://aur@aur.archlinux.org/gwt.git /tmp/aur-gwt
+cp PKGBUILD .SRCINFO /tmp/aur-gwt/
+cd /tmp/aur-gwt && git add PKGBUILD .SRCINFO && git commit -m "gwt 0.3.0" && git push
+```
+
+### 刻意接受的三条 namcap 告警
+
+```
+gwt W: ELF file ('usr/bin/gwt') lacks FULL RELRO, check LDFLAGS.
+gwt W: ELF file ('usr/bin/gwt') lacks PIE.
+gwt W: Dependency included, but may not be needed ('git')
+```
+
+- 前两条是**刻意**的：加 `-buildmode=pie` 会让产物变成
+  `dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2`，也就是依赖 glibc 的
+  动态加载器，musl 发行版（Alpine）直接跑不起来。本工具的分发策略是「一个静态二进制
+  跑遍所有 Linux 发行版」，因此拿这两条加固类告警换取无解释器依赖。真要改成 PIE，
+  就得同时放弃 `install.sh` 的跨发行版承诺。
+- 第三条是 namcap **误报**：它只看 ELF 链接依赖，而 gwt 是用子进程调用 `git` 的，
+  它看不出这个运行时依赖。**不要据此删掉 `depends=('git')`。**
+
+其它打包决定：`options=('!debug')` 是因为二进制用 `-s -w` 构建、本就没有调试符号，
+保留默认 debug 选项会生成一个空且 `.build-id` 链接失效的 `gwt-debug` 包（namcap 报 E 级）；
+构建期 `GOPROXY=off`，顺带证明构建不需要联网。
+
+## 许可证
+
+MIT，见 [LICENSE](LICENSE)。

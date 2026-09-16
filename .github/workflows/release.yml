@@ -1,0 +1,110 @@
+name: ci
+
+on:
+  push:
+    branches: ['master']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # 所有分支/tag 都会跑：格式、静态检查、单元测试、本机架构冒烟
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          # 与本机验证过的大版本对齐；升级 Go 时同步改这里
+          go-version: '1.27'
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "以下文件未通过 gofmt："
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test ./...
+      - name: 构建并冒烟运行（amd64）
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=ci" -o gwt .
+          ./gwt --version
+          ./gwt --json . | head -5
+
+  # 只有打 tag 才构建多架构产物
+  build:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goarch: ['amd64', 'arm64', '386', 'riscv64']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27'
+      - name: 构建 gwt-linux-${{ matrix.goarch }}
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          # 与 AUR PKGBUILD 用完全相同的参数，保证两边产物行为一致
+          go build -trimpath -buildvcs=false \
+            -ldflags "-s -w -X main.version=$version" \
+            -o "gwt-linux-${{ matrix.goarch }}" .
+      - name: 本机架构上真正跑一次（其它架构无法在本 runner 执行）
+        if: matrix.goarch == 'amd64'
+        run: |
+          ./gwt-linux-amd64 --version
+          ./gwt-linux-amd64 --strict --json . > /dev/null
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gwt-linux-${{ matrix.goarch }}
+          path: gwt-linux-${{ matrix.goarch }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: 生成 SHA256SUMS
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum gwt-linux-* > SHA256SUMS
+          cat SHA256SUMS
+      - name: 创建 Release 并上传产物
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes
+          fi

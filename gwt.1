@@ -1,0 +1,223 @@
+.\" gwt - read-only terminal inspector for git worktrees
+.TH GWT 1 "2026-09-16" "gwt 0.3.0" "User Commands"
+.SH NAME
+gwt \- read\-only terminal inspector for git worktrees across multiple repositories
+.SH SYNOPSIS
+.B gwt
+.RI [ options ]
+.I REPO_PATH
+.RI [ REPO_PATH .\|.\|.]
+.SH DESCRIPTION
+.B gwt
+lists every worktree of one or more git repositories and reports, per worktree:
+the real repository name, the worktree path, the checked\-out branch, the number of
+modified tracked files, the number of untracked files, the configured upstream, and
+an ahead/behind count computed from local refs only.
+.PP
+A path may be a main worktree, any subdirectory of a repository, or any linked
+worktree; it is resolved to the repository that contains it, following normal git
+semantics.
+.PP
+.B gwt
+is strictly read\-only. It never runs
+.BR fetch ,
+.BR pull ,
+.BR checkout ,
+.BR reset ,
+.BR clean ,
+.BR prune ,
+.BR gc ,
+.BR add ,
+.BR commit ,
+.BR rm ,
+.BR mv ,
+or any
+.B worktree
+subcommand that mutates state. Every git invocation is made with
+.B \-\-no\-optional\-locks
+and
+.BR GIT_OPTIONAL_LOCKS=0 ,
+so even the index refresh that
+.B git status
+would normally write back is suppressed. No network access is performed.
+.SH OPTIONS
+.TP
+.B \-\-json
+Emit JSON instead of the table. Field names and null semantics are stable; see the
+JSON section below.
+.TP
+.BI \-\-width " N"
+Force the table width instead of detecting the terminal width.
+.TP
+.B \-\-no\-truncate
+Do not truncate columns to fit the terminal. Useful when redirecting to a file.
+.TP
+.BI \-\-untracked " all|normal"
+How untracked files are counted. With
+.B all
+(the default) each file inside an untracked directory is counted; with
+.B normal
+an entire untracked directory counts as one entry.
+.TP
+.BI \-\-color " auto|always|never"
+Colour policy. The default
+.B auto
+enables colour only when stdout is a real terminal.
+.TP
+.BI \-\-timeout " SEC"
+Per\-invocation git timeout in seconds. The default is 120;
+.B 0
+disables the timeout.
+.TP
+.B \-\-strict
+Exit with status 1 when any worktree needs attention, instead of only when an input
+path fails to resolve.
+.TP
+.B \-\-version
+Print the version and exit.
+.TP
+.BR \-h ", " \-\-help
+Print usage and exit.
+.SH "TABLE COLUMNS"
+.TP
+.B 仓库 (repository)
+Real repository name; the main worktree is marked
+.BR [main] .
+.TP
+.B worktree path
+Full path. When space is tight it is truncated from the left so the tail stays
+recognisable.
+.TP
+.B branch
+The branch name, or
+.BR "(detached) <sha>" ,
+.BR "(unborn) <branch>" ,
+.BR "(bare)" ,
+or
+.B "(unknown HEAD)" .
+.TP
+.B modified
+Count of modified tracked files, including staged, unstaged and conflicted entries;
+a rename or copy counts once. Shown as
+.B \-
+when the path is gone \- never as 0.
+.TP
+.B untracked
+Count of untracked files, excluding ignored ones.
+.TP
+.B upstream
+The upstream ref name;
+.B "(none)"
+when no upstream is configured;
+.B "<name> (ref missing locally)"
+when one is configured but the local ref does not exist;
+.B \-
+when not applicable.
+.TP
+.B ahead/behind
+Written as
+.BR +ahead/\-behind ,
+for example
+.BR +1/\-2 .
+.B \-
+means not applicable;
+.B ?
+means the value cannot be computed.
+.SH "JSON OUTPUT"
+The document contains
+.BR schema ,
+.BR tool ,
+.BR version ,
+.BR generated_at ,
+.BR read_only ,
+.BR fetched ,
+.BR untracked_mode ,
+.BR notes ,
+.BR summary ,
+.B repos
+and
+.BR errors .
+Each worktree reports
+.BR head.state
+(one of
+.BR branch ,
+.BR detached ,
+.BR unborn ,
+.BR unknown ),
+.BR tracked_modified ,
+.BR untracked ,
+.BR conflicts ,
+and an
+.B upstream
+object whose
+.B state
+distinguishes
+.B none
+(no upstream configured) from
+.B missing_ref
+(configured but the local ref is absent).
+.PP
+Unknown values are reported as
+.B null
+or
+.BR unknown ;
+they are never silently reported as zero.
+.SH "EXIT STATUS"
+.TP
+.B 0
+All input paths resolved. Worktree\-level problems do not fail the run unless
+.B \-\-strict
+is given.
+.TP
+.B 1
+An input path could not be resolved, or
+.B \-\-strict
+was given and some worktree needs attention.
+.TP
+.B 2
+Usage error, or git could not be found.
+.SH EXAMPLES
+List the worktrees of two repositories:
+.PP
+.RS 4
+.EX
+gwt ~/code/alpha ~/code/beta
+.EE
+.RE
+.PP
+Inspect the summary as JSON:
+.PP
+.RS 4
+.EX
+gwt \-\-json ~/code/alpha | jq .summary
+.EE
+.RE
+.PP
+Fail a script when anything needs attention:
+.PP
+.RS 4
+.EX
+gwt \-\-strict ~/code/alpha
+.EE
+.RE
+.SH LIMITATIONS
+Ahead/behind is derived from local refs only, so it lags the remote until you fetch;
+upstream.ref_commit_date shows how old the local ref is.
+.PP
+Only counts are reported, never file lists; stash entries, submodule internals and
+ignored files are not counted.
+.PP
+Worktrees whose directory has been deleted are reported from registration data only,
+and
+.B gwt
+never prunes them for you.
+.PP
+This build supports Linux only, because determining whether stdout is a terminal and
+querying its width uses Linux ioctls.
+.PP
+A terminal narrower than 82 columns cannot show all columns; the table then stays at
+82 columns rather than squeezing columns below their minimum, and a hint is printed.
+.SH AUTHOR
+xiangnan0811
+.PP
+Source: https://github.com/xiangnan0811/gwt
