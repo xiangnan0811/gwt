@@ -1,0 +1,15 @@
+pkgbase = gwt
+	pkgdesc = Read-only terminal inspector for git worktrees across multiple repositories
+	pkgver = 0.3.0
+	pkgrel = 1
+	url = https://github.com/xiangnan0811/gwt
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	makedepends = go
+	depends = git
+	options = !debug
+	source = gwt-0.3.0.tar.gz::https://github.com/xiangnan0811/gwt/archive/refs/tags/v0.3.0.tar.gz
+	sha256sums = a74412069c15b308a80dccbaf676b3993b321655733a07c457579d4bd48d0506
+
+pkgname = gwt

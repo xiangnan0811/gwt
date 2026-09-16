@@ -1,0 +1,57 @@
+# Maintainer: xiangnan0811 <xiangnan0811@users.noreply.github.com>
+# shellcheck disable=SC2034  # pkgver/pkgdesc/arch/... 由 makepkg 读取，脚本内不引用
+# shellcheck disable=SC2154  # srcdir/pkgdir/startdir 由 makepkg 注入
+pkgname=gwt
+pkgver=0.3.0
+pkgrel=1
+pkgdesc='Read-only terminal inspector for git worktrees across multiple repositories'
+arch=('x86_64' 'aarch64')
+url='https://github.com/xiangnan0811/gwt'
+license=('MIT')
+# 运行时确实要调用 git 可执行文件（exec.LookPath("git")），但因为是子进程调用而不是
+# 链接依赖，namcap 会报 "Dependency included, but may not be needed ('git')" —— 这是误报，
+# 不要据此删掉这行。
+depends=('git')
+makedepends=('go')
+# !debug：二进制用 -s -w 构建，本来就没有调试符号；若保留默认的 debug 选项，makepkg 会生成
+# 一个空的 gwt-debug 包，且其中的 .build-id 符号链接指向不存在的文件（namcap 报 E 级错误）。
+options=('!debug')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('a74412069c15b308a80dccbaf676b3993b321655733a07c457579d4bd48d0506')
+
+build() {
+  cd "$srcdir/$pkgname-$pkgver" || exit 1
+
+  # 构建期不联网、不下载工具链：本包零第三方依赖，GOPROXY=off 可以顺带证明这一点
+  export CGO_ENABLED=0
+  export GOCACHE="$srcdir/.gocache"
+  export GOPROXY=off
+  export GOTOOLCHAIN=local
+
+  # 刻意不加 -buildmode=pie：那会让产物变成 "dynamically linked, interpreter
+  # /lib64/ld-linux-x86-64.so.2"，即依赖 glibc 的动态加载器，musl 发行版（Alpine 等）
+  # 直接跑不起来。本工具分发策略就是"一个静态二进制跑遍所有 Linux 发行版"，因此接受
+  # namcap 的 "lacks PIE" 与 "lacks FULL RELRO" 两条警告，换取无解释器依赖。
+  # -buildvcs=false：不嵌入 VCS 信息，保证可复现；版本号由 ldflags 注入。
+  go build -trimpath -buildvcs=false \
+    -ldflags "-s -w -X main.version=$pkgver" \
+    -o gwt .
+}
+
+check() {
+  cd "$srcdir/$pkgname-$pkgver" || exit 1
+
+  export CGO_ENABLED=0
+  export GOCACHE="$srcdir/.gocache"
+  export GOPROXY=off
+  export GOTOOLCHAIN=local
+
+  go test ./...
+}
+
+package() {
+  cd "$srcdir/$pkgname-$pkgver" || exit 1
+  install -Dm755 gwt "$pkgdir/usr/bin/gwt"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 gwt.1 "$pkgdir/usr/share/man/man1/gwt.1"
+}
