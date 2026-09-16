@@ -247,9 +247,13 @@ python3 tests/fixtures.py /tmp/gwt-demo      # 打印各 fixture 路径
 ### 发一个版本
 
 ```bash
-# 1) 打 tag 推送：CI 会跑 gofmt/vet/test，再构建 linux/{amd64,arm64,386,riscv64}
+# 1) 先推 master，再**单独**推 tag
+#    注意：如果 master 与 tag 指向同一个 commit 且写在同一条 git push 里，
+#    GitHub 会按 commit 去重、只建一个 workflow run —— tag 触发的
+#    build/release 就不会跑（实测踩过：Release 一直不出现）。务必分两次推。
+git push origin master
 git tag -a v0.3.0 -m "gwt 0.3.0"
-git push origin master v0.3.0
+git push origin v0.3.0
 
 # 2) 用归档 tarball 的真实校验和更新 PKGBUILD
 #    GitHub 归档会去掉 tag 的前导 v：tag v0.3.0 → 顶层目录 gwt-0.3.0

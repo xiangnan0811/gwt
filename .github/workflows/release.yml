@@ -68,11 +68,19 @@ jobs:
           go build -trimpath -buildvcs=false \
             -ldflags "-s -w -X main.version=$version" \
             -o "gwt-linux-${{ matrix.goarch }}" .
-      - name: 本机架构上真正跑一次（其它架构无法在本 runner 执行）
+      - name: 本机架构上冒烟（其它架构无法在本 runner 执行）
         if: matrix.goarch == 'amd64'
         run: |
+          set -euo pipefail
           ./gwt-linux-amd64 --version
-          ./gwt-linux-amd64 --strict --json . > /dev/null
+          # 刻意不用 --strict：actions/checkout 留下的是 detached HEAD 且没有 upstream，
+          # 那本来就属于「需要关注」的状态，--strict 会（正确地）返回 1。
+          # 这里改为直接校验 JSON 契约本身，不依赖 runner 上仓库的干净程度。
+          ./gwt-linux-amd64 --json . > /tmp/gwt.json
+          python3 -c 'import json; d=json.load(open("/tmp/gwt.json")); assert d["schema"]==1 and d["tool"]=="gwt"; assert d["read_only"] is True and d["fetched"] is False; assert d["summary"]["worktrees"]>=1; print("JSON 契约 OK:", d["summary"])'
+          # 表格路径也要跑通；重定向到文件后再取前几行，避免 pipefail 下 SIGPIPE 误判
+          ./gwt-linux-amd64 --color never --width 100 . > /tmp/gwt.txt
+          head -3 /tmp/gwt.txt
       - uses: actions/upload-artifact@v7
         with:
           name: gwt-linux-${{ matrix.goarch }}
